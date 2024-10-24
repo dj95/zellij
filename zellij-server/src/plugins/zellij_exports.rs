@@ -18,8 +18,8 @@ use std::{
 };
 use wasmtime::{Caller, Linker};
 use zellij_utils::data::{
-    CommandType, ConnectToSession, FloatingPaneCoordinates, HttpVerb, LayoutInfo, MessageToPlugin,
-    OriginatingPlugin, PermissionStatus, PermissionType, PluginPermission,
+    CommandType, ConnectToSession, FloatingPaneCoordinates, HttpVerb, KeyWithModifier, LayoutInfo,
+    MessageToPlugin, OriginatingPlugin, PermissionStatus, PermissionType, PluginPermission,
 };
 use zellij_utils::input::permission::PermissionCache;
 use zellij_utils::{
@@ -346,6 +346,12 @@ fn host_run_plugin_command(caller: Caller<'_, PluginEnv>) {
                         load_in_background,
                         skip_plugin_cache,
                     } => load_new_plugin(env, url, config, load_in_background, skip_plugin_cache),
+                    PluginCommand::RebindKeys {
+                        keys_to_rebind,
+                        keys_to_unbind,
+                        write_config_to_disk,
+                    } => rebind_keys(env, keys_to_rebind, keys_to_unbind, write_config_to_disk)?,
+                    PluginCommand::ListClients => list_clients(env),
                 },
                 (PermissionStatus::Denied, permission) => {
                     log::error!(
@@ -970,6 +976,25 @@ fn reconfigure(env: &PluginEnv, new_config: String, write_config_to_disk: bool) 
     Ok(())
 }
 
+fn rebind_keys(
+    env: &PluginEnv,
+    keys_to_rebind: Vec<(InputMode, KeyWithModifier, Vec<Action>)>,
+    keys_to_unbind: Vec<(InputMode, KeyWithModifier)>,
+    write_config_to_disk: bool,
+) -> Result<()> {
+    let err_context = || "Failed to rebind_keys";
+    let client_id = env.client_id;
+    env.senders
+        .send_to_server(ServerInstruction::RebindKeys {
+            client_id,
+            keys_to_rebind,
+            keys_to_unbind,
+            write_config_to_disk,
+        })
+        .with_context(err_context)?;
+    Ok(())
+}
+
 fn switch_to_mode(env: &PluginEnv, input_mode: InputMode) {
     let action = Action::SwitchToMode(input_mode);
     let error_msg = || format!("failed to switch to mode in plugin {}", env.name());
@@ -1450,6 +1475,15 @@ fn dump_session_layout(env: &PluginEnv) {
         .map(|sender| sender.send(ScreenInstruction::DumpLayoutToPlugin(env.plugin_id)));
 }
 
+fn list_clients(env: &PluginEnv) {
+    let _ = env.senders.to_screen.as_ref().map(|sender| {
+        sender.send(ScreenInstruction::ListClientsToPlugin(
+            env.plugin_id,
+            env.client_id,
+        ))
+    });
+}
+
 fn scan_host_folder(env: &PluginEnv, folder_to_scan: PathBuf) {
     if !folder_to_scan.starts_with("/host") {
         log::error!(
@@ -1873,8 +1907,12 @@ fn check_command_permission(
         | PluginCommand::BlockCliPipeInput(..)
         | PluginCommand::CliPipeOutput(..) => PermissionType::ReadCliPipes,
         PluginCommand::MessageToPlugin(..) => PermissionType::MessageAndLaunchOtherPlugins,
-        PluginCommand::DumpSessionLayout => PermissionType::ReadApplicationState,
-        PluginCommand::Reconfigure(..) => PermissionType::Reconfigure,
+        PluginCommand::ListClients | PluginCommand::DumpSessionLayout => {
+            PermissionType::ReadApplicationState
+        },
+        PluginCommand::RebindKeys { .. } | PluginCommand::Reconfigure(..) => {
+            PermissionType::Reconfigure
+        },
         _ => return (PermissionStatus::Granted, None),
     };
 

@@ -26,7 +26,7 @@ use wasm_bridge::WasmBridge;
 use zellij_utils::{
     async_std::{channel, future::timeout, task},
     data::{
-        Event, EventType, InputMode, MessageToPlugin, PermissionStatus, PermissionType,
+        ClientInfo, Event, EventType, InputMode, MessageToPlugin, PermissionStatus, PermissionType,
         PipeMessage, PipeSource, PluginCapabilities,
     },
     errors::{prelude::*, ContextType, PluginContext},
@@ -158,6 +158,7 @@ pub enum PluginInstruction {
         file_path: Option<PathBuf>,
     },
     WatchFilesystem,
+    ListClientsToPlugin(SessionLayoutMetadata, PluginId, ClientId),
     Exit,
 }
 
@@ -203,6 +204,7 @@ impl From<&PluginInstruction> for PluginContext {
             PluginInstruction::FailedToWriteConfigToDisk { .. } => {
                 PluginContext::FailedToWriteConfigToDisk
             },
+            PluginInstruction::ListClientsToPlugin(..) => PluginContext::ListClientsToPlugin,
         }
     }
 }
@@ -426,9 +428,13 @@ pub(crate) fn plugin_thread_main(
 
                 let mut plugin_ids: HashMap<RunPluginOrAlias, Vec<PluginId>> = HashMap::new();
                 tab_layout = tab_layout.or_else(|| Some(layout.new_tab().0));
-                tab_layout
-                    .as_mut()
-                    .map(|t| t.populate_plugin_aliases_in_layout(&plugin_aliases));
+                tab_layout.as_mut().map(|t| {
+                    t.populate_plugin_aliases_in_layout(&plugin_aliases);
+                    if let Some(cwd) = cwd.as_ref() {
+                        t.add_cwd_to_layout(cwd);
+                    }
+                    t
+                });
                 floating_panes_layout.iter_mut().for_each(|f| {
                     f.run
                         .as_mut()
@@ -552,21 +558,33 @@ pub(crate) fn plugin_thread_main(
                 )?;
             },
             PluginInstruction::DumpLayout(mut session_layout_metadata, client_id) => {
-                populate_session_layout_metadata(&mut session_layout_metadata, &wasm_bridge);
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
                 drop(bus.senders.send_to_pty(PtyInstruction::DumpLayout(
                     session_layout_metadata,
                     client_id,
                 )));
             },
             PluginInstruction::ListClientsMetadata(mut session_layout_metadata, client_id) => {
-                populate_session_layout_metadata(&mut session_layout_metadata, &wasm_bridge);
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
                 drop(bus.senders.send_to_pty(PtyInstruction::ListClientsMetadata(
                     session_layout_metadata,
                     client_id,
                 )));
             },
             PluginInstruction::DumpLayoutToPlugin(mut session_layout_metadata, plugin_id) => {
-                populate_session_layout_metadata(&mut session_layout_metadata, &wasm_bridge);
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
                 match session_serialization::serialize_session_layout(
                     session_layout_metadata.into(),
                 ) {
@@ -591,8 +609,41 @@ pub(crate) fn plugin_thread_main(
                     },
                 }
             },
+            PluginInstruction::ListClientsToPlugin(
+                mut session_layout_metadata,
+                plugin_id,
+                client_id,
+            ) => {
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
+                let mut clients_metadata = session_layout_metadata.all_clients_metadata();
+                let mut client_list_for_plugin = vec![];
+                let default_editor = session_layout_metadata.default_editor.clone();
+                for (client_metadata_id, client_metadata) in clients_metadata.iter_mut() {
+                    let is_current_client = client_metadata_id == &client_id;
+                    client_list_for_plugin.push(ClientInfo::new(
+                        *client_metadata_id,
+                        client_metadata.get_pane_id().into(),
+                        client_metadata.stringify_command(&default_editor),
+                        is_current_client,
+                    ));
+                }
+                let updates = vec![(
+                    Some(plugin_id),
+                    Some(client_id),
+                    Event::ListClients(client_list_for_plugin),
+                )];
+                wasm_bridge.update_plugins(updates, shutdown_send.clone())?;
+            },
             PluginInstruction::LogLayoutToHd(mut session_layout_metadata) => {
-                populate_session_layout_metadata(&mut session_layout_metadata, &wasm_bridge);
+                populate_session_layout_metadata(
+                    &mut session_layout_metadata,
+                    &wasm_bridge,
+                    &plugin_aliases,
+                );
                 drop(
                     bus.senders
                         .send_to_pty(PtyInstruction::LogLayoutToHd(session_layout_metadata)),
@@ -871,6 +922,7 @@ pub(crate) fn plugin_thread_main(
 fn populate_session_layout_metadata(
     session_layout_metadata: &mut SessionLayoutMetadata,
     wasm_bridge: &WasmBridge,
+    plugin_aliases: &PluginAliases,
 ) {
     let plugin_ids = session_layout_metadata.all_plugin_ids();
     let mut plugin_ids_to_cmds: HashMap<u32, RunPlugin> = HashMap::new();
@@ -884,6 +936,7 @@ fn populate_session_layout_metadata(
         }
     }
     session_layout_metadata.update_plugin_cmds(plugin_ids_to_cmds);
+    session_layout_metadata.update_plugin_aliases_in_default_layout(plugin_aliases);
 }
 
 fn pipe_to_all_plugins(
