@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
-* feat(layouts): allow consuming a layout through a url (https://github.com/zellij-org/zellij/pull/3351)
+* feat(layouts): allow consuming a layout through a url (https://github.com/zellij-org/zellij/pull/3351 and https://github.com/zellij-org/zellij/pull/3697)
 * dependencies: eliminate future incompatibility warnings (https://github.com/zellij-org/zellij/pull/3315)
 * fix(plugins): occasional out of order events on startup (https://github.com/zellij-org/zellij/pull/3367)
 * feat(keybinds): support multiple modifiers (eg. Ctrl+Alt) and the kitty keyboard protocol (https://github.com/zellij-org/zellij/pull/3383, https://github.com/zellij-org/zellij/pull/3441 and https://github.com/zellij-org/zellij/pull/3484)
@@ -40,7 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 * feat(cli): add cache folder indication to `zellij setup --check` (https://github.com/zellij-org/zellij/pull/3652)
 * fix(ui): various panename fixes (https://github.com/zellij-org/zellij/pull/3653)
 * fix(ux): only damage the relevant swap layout layer when resizing panes (https://github.com/zellij-org/zellij/pull/3654)
-* fix(ui): set background color for UI components (https://github.com/zellij-org/zellij/pull/3658)
+* fix(ui): set background color for UI components (https://github.com/zellij-org/zellij/pull/3658 and https://github.com/zellij-org/zellij/pull/3681)
 * fix(plugins): properly handle concurrent http plugin downloads (https://github.com/zellij-org/zellij/pull/3664)
 * fix(plugins): protect from various fail conditions in plugin loading and API (https://github.com/zellij-org/zellij/pull/3665)
 * fix(resurrection): properly serialize plugin aliases (https://github.com/zellij-org/zellij/pull/3673)
